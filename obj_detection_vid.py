@@ -9,7 +9,7 @@ upper_red2 = (180, 255, 255)
 
 # Open a video stream (0 for default webcam, or use your smartphone's webcam feed URL)
 # If you use an IP webcam app, replace '0' with the URL (e.g., 'http://192.168.x.x:8080/video').
-cap = cv2.VideoCapture(2)
+cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
     print("Erreur : Impossible d'accéder à la caméra.")

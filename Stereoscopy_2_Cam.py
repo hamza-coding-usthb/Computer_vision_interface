@@ -1,13 +1,15 @@
 import cv2
 import numpy as np
+import glob
+import os
 
 # **1. Fonction de calibration de la caméra**
-def calibrate_camera(images, grid_size, square_size):
+def calibrate_camera(image_folder, grid_size, square_size):
     """
     Calibre une caméra à l'aide d'images d'un échiquier.
 
     Args:
-    - images : Liste des chemins vers les images d'échiquier.
+    - image_folder : Dossier contenant les images d'échiquier.
     - grid_size : Taille de la grille (colonnes, lignes de coins intérieurs).
     - square_size : Taille d'une case de l'échiquier (en millimètres).
 
@@ -22,8 +24,14 @@ def calibrate_camera(images, grid_size, square_size):
     objpoints = []  # Liste des points 3D réels
     imgpoints = []  # Liste des points 2D détectés dans les images
 
-    # Pour chaque image d'échiquier fournie
-    for image_path in images:
+    # Charger les images du dossier
+    image_paths = glob.glob(os.path.join(image_folder, "*.jpg"))
+    if not image_paths:
+        print(f"Aucune image trouvée dans le dossier {image_folder}.")
+        return None, None
+
+    for image_path in image_paths:
+        print(f"Processing {image_path}...")
         image = cv2.imread(image_path)  # Charger l'image
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Convertir en niveaux de gris
 
@@ -40,6 +48,10 @@ def calibrate_camera(images, grid_size, square_size):
             cv2.waitKey(500)
 
     cv2.destroyAllWindows()
+
+    if len(objpoints) == 0 or len(imgpoints) == 0:
+        print("Échec de la détection des coins d'échiquier.")
+        return None, None
 
     # Calibration de la caméra
     ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
@@ -63,7 +75,7 @@ def calculate_3d_position(uL, uR, vL, focal_length, baseline, cx, cy):
 
     Args:
     - uL, uR : Coordonnées X du point dans les images de gauche et de droite.
-    - vL : Coordonnée Y dans l'image de gauche (vR non utilisé ici car supposé identique à vL).
+    - vL : Coordonnée Y dans l'image de gauche.
     - focal_length : Distance focale de la caméra.
     - baseline : Distance entre les deux caméras (en millimètres).
     - cx, cy : Coordonnées du centre optique.
@@ -124,17 +136,17 @@ def detect_red_objects(frame, lower_red1, upper_red1, lower_red2, upper_red2):
 # **4. Script principal**
 if __name__ == "__main__":
     # **Calibration de la caméra**
-    chessboard_images = ['chessboard1.jpg', 'chessboard2.jpg', 'chessboard3.jpg']
-    grid_size = (9, 6)  # Taille de la grille d'échiquier
-    square_size = 25  # Taille des cases en mm
+    image_folder = "chessboard images"  # Remplacez par le dossier contenant vos images
+    grid_size = (7, 9)  # Taille de la grille d'échiquier
+    square_size = 20  # Taille des cases en mm
 
-    camera_matrix, dist_coeffs = calibrate_camera(chessboard_images, grid_size, square_size)
+    camera_matrix, dist_coeffs = calibrate_camera(image_folder, grid_size, square_size)
 
     if camera_matrix is not None:
         focal_length = camera_matrix[0, 0]  # Distance focale
         cx = camera_matrix[0, 2]  # Coordonnée X du centre optique
         cy = camera_matrix[1, 2]  # Coordonnée Y du centre optique
-        baseline = 120  # Distance entre les caméras en mm
+        baseline = 240  # Distance entre les caméras en mm
     else:
         print("Échec de la calibration de la caméra.")
         exit()
@@ -146,38 +158,56 @@ if __name__ == "__main__":
     upper_red2 = (180, 255, 255)
 
     # **Capture vidéo des deux caméras**
-    cap_left = cv2.VideoCapture(0)  # Caméra gauche
-    cap_right = cv2.VideoCapture(1)  # Caméra droite
+# **Capture vidéo des deux caméras**
+cap_left = cv2.VideoCapture(0)  # Caméra gauche
+cap_right = cv2.VideoCapture(1)  # Caméra droite
 
+# Define fixed window names
+cv2.namedWindow('Caméra Gauche', cv2.WINDOW_NORMAL)
+cv2.namedWindow('Caméra Droite', cv2.WINDOW_NORMAL)
+
+try:
     while cap_left.isOpened() and cap_right.isOpened():
+        # Capture frames from both cameras
         ret_left, frame_left = cap_left.read()
         ret_right, frame_right = cap_right.read()
 
-        if not ret_left or not ret_right:
-            print("Erreur lors de la capture vidéo.")
+        # Validate frames
+        if not ret_left or frame_left is None:
+            print("Invalid frame from Caméra Gauche. Exiting.")
+            break
+        if not ret_right or frame_right is None:
+            print("Invalid frame from Caméra Droite. Exiting.")
             break
 
-        # Détection des objets rouges dans les deux images
+        # Detect red objects in the frames
         frame_left, centers_left = detect_red_objects(frame_left, lower_red1, upper_red1, lower_red2, upper_red2)
         frame_right, centers_right = detect_red_objects(frame_right, lower_red1, upper_red1, lower_red2, upper_red2)
 
+        # Calculate 3D position if objects are detected in both cameras
         if centers_left and centers_right:
-            uL, vL = centers_left[0]  # Premier objet détecté dans la caméra gauche
-            uR, vR = centers_right[0]  # Premier objet détecté dans la caméra droite
+            uL, vL = centers_left[0]  # First detected object in Caméra Gauche
+            uR, vR = centers_right[0]  # First detected object in Caméra Droite
             try:
                 X, Y, Z = calculate_3d_position(uL, uR, vL, focal_length, baseline, cx, cy)
                 print(f"Position 3D : X={X:.2f}, Y={Y:.2f}, Z={Z:.2f}")
             except ValueError as e:
-                print(e)
+                print(f"Error calculating 3D position: {e}")
 
-        # Afficher les images annotées
+        # Display annotated frames in fixed windows
         cv2.imshow('Caméra Gauche', frame_left)
         cv2.imshow('Caméra Droite', frame_right)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):  # Quitter avec 'q'
+        # Limit frame rate and handle exit condition
+        if cv2.waitKey(30) & 0xFF == ord('q'):  # Exit on pressing 'q'
             break
 
-    # Libérer les ressources
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+
+finally:
+    # Release resources and ensure all windows are closed
     cap_left.release()
     cap_right.release()
     cv2.destroyAllWindows()
+    print("Resources released and all windows closed.")
